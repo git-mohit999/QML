@@ -1,0 +1,196 @@
+\documentclass{article}
+
+\usepackage{amsmath, amssymb}
+\usepackage{hyperref}
+
+\title{AIDEAZ}
+\author{}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+
+\section{Analysis of Rare Events through QGA}
+
+\subsubsection*{Parameter-to-Unitary Mapping}
+We use geometry as the main identifier of rare events. Since $SU(n)$ admits a geometric interpretation of unitary evolution, using a higher-dimensional group structure (beyond the Bloch sphere $SU(2)/U(1)$) may be useful. For each chromosome with parameters $\theta \in \mathbb{R}^d$, construct
+\[
+U(\theta) \in SU(n), \qquad n = 2^q \text{ for } q \text{ qubits}.
+\]
+
+\subsubsection*{Embedding into the Lie Algebra}
+Embed each unitary into the tangent space of $SU(n)$ via
+\[
+A(\theta) = \log\!\big( U(\theta) \big),
+\]
+where $A(\theta) \in \mathfrak{su}(n)$ is skew-Hermitian and satisfies
+$\mathrm{Tr}(A(\theta)) = 0$. This linearizes the local geometry, which is required for applying Mahalanobis distances.
+
+\paragraph{Note.}
+While reading up on this stuff I came across some of the more intrinsic Lie-group geometry on $SU(n)$—things like the geodesic distance $\|\log(U_1^\dagger U_2)\|$.I'm not fully comfortable with it yet, so I stuck with the tangent-space log map for now since it works naturally with the Mahalanobis setup used.
+
+
+\subsubsection*{Vectorization}
+Flatten each tangent-space matrix:
+\[
+v(\theta) = \mathrm{vec}\!\big( A(\theta) \big),
+\]
+yielding a real vector needed for computing means and covariances.
+
+\subsubsection*{Covariance Matrix Estimation}
+Given a population $\{v(\theta_i)\}_{i=1}^N$, compute
+\[
+\mu = \frac{1}{N}\sum_{i=1}^N v(\theta_i), \qquad
+\Omega = \frac{1}{N-1}\sum_{i=1}^N (v_i - \mu)(v_i - \mu)^{T}.
+\]
+Here, $\Omega$ is a covariance matrix that stores the multivariate shape of the population around its mean.
+
+\subsubsection*{Mahalanobis Distance and Density}
+Define the metric
+\[
+D(\theta_a,\theta_b)=\sqrt{(v_a-v_b)^T \Omega^{-1}(v_a-v_b)}.
+\]
+
+For each $v(\theta_i)$, define the local density
+\[
+\rho(\theta_i)
+=\left|\left\{ j : D(\theta_i,\theta_j) < \delta \right\}\right|,
+\]
+where $\delta$ is the local neighbourhood radius used only for density evaluation. Following common practice, $\delta$ is chosen as the median Mahalanobis distance to the $k$-th nearest neighbour across the population.
+
+\subsection*{Rare Event Cluster Determination}
+
+A chromosome belongs to a rare-event cluster if:
+
+\begin{enumerate}
+    \item $\rho_{\min} \le \rho(\theta_i) \le \rho_{\text{threshold}}$
+    \quad (sparse but not single-point noise),
+    \item $f_{LL} \le f(\theta_i) \le f_{UL}$
+    \quad (mid-fitness valley region),
+    \item its Mahalanobis distance from the population mean satisfies
+    \[
+    D(\theta_i,\mu) > \epsilon,
+    \]
+\end{enumerate}
+
+where $\epsilon$ is obtained from a statistical confidence interval (e.g., a $\chi^2$ threshold in Mahalanobis space) under the hypothesis
+\[
+H_0 : \theta_i \text{ belongs to the main population used for convergence}.
+\]
+
+\subsection*{Rare-Event Tracking Across Generations}
+
+Once a rare-event cluster $C_g$ is detected in generation $g$, its centroid and shape are stored as the tuple
+\[
+A_g = (\mu_g, \Omega_g),
+\]
+where $\mu_g$ is the mean of the vectorized tangent-space points in the cluster, and $\Omega_g$ is the corresponding covariance matrix. This tuple acts as the signature of the rare-event region at generation $g$.
+
+To determine whether a newly detected rare-event cluster in generation $g$ corresponds to the \emph{same} anomaly as one detected in generation $h$, their centroids are compared using a strict Mahalanobis distance defined with respect to the older cluster's shape:
+\[
+D_{gh} = \sqrt{(\mu_g - \mu_h)^T \Omega_h^{-1} (\mu_g - \mu_h)}.
+\]
+
+A match is accepted only if:
+\begin{enumerate}
+    \item \textbf{Centroid proximity:}
+    \[
+    D_{gh} < \tau,
+    \]
+    meaning the new centroid lies well inside the older ellipsoid.
+    \item \textbf{Overlap:} At least say 50\% of points in $C_g$ satisfy
+    \[
+    \sqrt{(v(\theta_i)-\mu_h)^T \Omega_h^{-1}(v(\theta_i)-\mu_h)} < \tau,
+    \]
+    ensuring substantial overlap with the older rare region.
+    \item \textbf{Fitness consistency:} The mean fitness of $C_g$ differs from that of $C_h$ by no more than say
+    10\%.
+\end{enumerate}
+
+A rare event is confirmed as a recurring anomaly only if these matching conditions hold for at least some 'm' consecutive generations. This prevents accidental matches caused by random fluctuations and ensures the detection
+of only stable rare events.
+
+
+
+\section{Fitness function as an observable in QGA}
+
+Using an observable as the fitness function aligns this method with variational quantum algorithms (such as VQE and QAOA), where the goal is to find parameters that minimize or maximize $\langle \psi(\theta)|O|\psi(\theta)\rangle$. However, instead of relying on gradients which are prone to barren plateaus, using observables provide a gradient-free global search mechanism that is better for highly nonlinear, correlated quantum landscapes.
+The QGA therefore alternates between (a) purely classical evolutionary updates and (b) quantum evaluations of the observable.
+
+\subsection*{Parameter-to-Circuit Mapping}
+Each chromosome $\theta \in \mathbb{R}^d$ defines a parametrized variational quantum circuit
+\[
+U(\theta)
+\]
+acting on $q$ qubits. This prepares the quantum state
+\[
+|\psi(\theta)\rangle = U(\theta)\,|0\rangle^{\otimes q}.
+\]
+
+The QGA never manipulates quantum states directly; it only manipulates the classical parameters $\theta$. The circuit is invoked strictly for fitness evaluation.
+
+\subsection*{Observable-Based Fitness}
+Given a Hermitian observable $O$ that encodes the task's objective structure, the fitness of a chromosome is defined as
+\[
+f(\theta)
+    = \langle \psi(\theta)\,|\, O \,|\, \psi(\theta) \rangle.
+\]
+
+Following are choices for $O$ to be useful in their corresponding scenarios:
+\begin{itemize}
+    \item Pauli operators (e.g.\ $Z^{\otimes q}$) for alignment-based
+    objectives,
+    \item task-specific measurement operators,
+    \item Hamiltonians $H = \sum_i w_i P_i$ for energy minimization,
+    \item projectors $|\psi_{\mathrm{target}}\rangle\langle
+          \psi_{\mathrm{target}}|$ for overlap-based tasks.
+\end{itemize}
+
+
+
+\subsection*{Classical–Quantum Alternation Loop}
+The full optimization proceeds in alternating stages:
+\begin{enumerate}
+    \item \textbf{Classical stage:} A population of parameter vectors
+    $\{\theta_i^{(t)}\}$ is updated using standard QGA operators (selection, crossover, mutation, and the amplitude-update rule).     These operations act \emph{only} on the classical parameters.
+
+    \item \textbf{Quantum stage:} Each parameter vector is converted to a quantum state via $U(\theta)$, and its fitness is evaluated using the observable expectation
+    \[
+    f(\theta) = \langle \psi(\theta)|O|\psi(\theta)\rangle.
+    \]
+
+\end{enumerate}
+
+ \section{Potential Applications}
+
+The geometric anomaly-detection framework can be applied wherever optimization algorithms exhibit hidden structure, rare modes, or non-trivial convergence paths. Potential applications include:
+
+\begin{itemize}
+    \item \textbf{Diagnostics of variational quantum algorithms:}
+    Detecting rare intermediate states that appear during VQE or QAOA optimization, helping understand convergence failures or plateaus.
+
+    \item \textbf{Landscape analysis in evolutionary algorithms:} Revealing secondary basins and rare valleys that standard fitness
+    evaluations do not capture.
+
+    \item \textbf{Hamiltonian learning and state identification:} Detecting outlier eigenstates or rare measurement patterns during iterative learning procedures.
+\end{itemize}
+
+Replacing the classical fitness function with a quantum observable makes QGA compatible with a wide range of QML and variational tasks. Some representative applications include:
+
+\begin{itemize}
+    \item \textbf{Variational quantum eigensolvers (VQE):}
+    The observable $O$ can be chosen as a molecular or physical Hamiltonian, allowing QGA to optimize the variational parameters without gradients.
+
+    \item \textbf{State preparation:}
+    Using projectors as observables, QGA can search for parameters that prepare a target quantum state.
+
+    \item \textbf{Quantum hardware calibration:}
+    Selecting circuit parameters or pulse amplitudes that maximize an experimentally measured observable.
+
+    \item \textbf{QML classification tasks:}
+    Encoding class structure in an observable and letting QGA discover parameters that best separate data through quantum measurements.
+\end{itemize}
+
+\end{document}
